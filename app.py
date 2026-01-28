@@ -1,36 +1,27 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
-# -----------------------------------
-# PAGE CONFIG
-# -----------------------------------
-st.set_page_config(page_title="Wholesale Customer Segmentation", layout="wide")
+# ---------------------------
+# PAGE SETUP
+# ---------------------------
+st.set_page_config(page_title="Customer Segmentation Dashboard", layout="centered")
 
-st.title("📦 Wholesale Customer Segmentation App")
-st.write("Customers are grouped based on annual spending behavior using K-Means Clustering.")
+st.title("🟢 Customer Segmentation Dashboard")
+st.write("This system uses K-Means Clustering to group customers based on purchasing behavior.")
 
-# -----------------------------------
+# ---------------------------
 # LOAD DATA
-# -----------------------------------
+# ---------------------------
 @st.cache_data
 def load_data():
     return pd.read_csv("Wholesale customers data.csv")
 
 df = load_data()
 
-# -----------------------------------
-# TASK 1: DATA EXPLORATION
-# -----------------------------------
-st.subheader("🔹 Dataset Preview")
-st.dataframe(df.head())
-# -----------------------------------
-# TASK 2: FEATURE SELECTION
-# -----------------------------------
+# Only spending features
 features = [
     "Fresh",
     "Milk",
@@ -40,103 +31,77 @@ features = [
     "Delicassen"
 ]
 
+# ---------------------------
+# SIDEBAR CONTROLS
+# ---------------------------
+st.sidebar.header("Clustering Controls")
 
+feature1 = st.sidebar.selectbox("Feature 1", features)
+feature2 = st.sidebar.selectbox("Feature 2", features)
 
-X = df[features]
+k = st.sidebar.slider("Clusters (K)", 2, 10, 3)
+random_state = st.sidebar.number_input("Random State", value=42)
 
-st.write("These features directly represent customer purchasing behavior.")
+run = st.sidebar.button("🟦 Run Clustering")
 
-# -----------------------------------
-# TASK 3: DATA PREPARATION
-# -----------------------------------
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+# Validation
+if feature1 == feature2:
+    st.warning("Please select two different features.")
 
-st.success("Data Standardized Successfully")
+# ---------------------------
+# RUN CLUSTERING
+# ---------------------------
+if run and feature1 != feature2:
 
-# -----------------------------------
-# TASK 4 & 5: ELBOW METHOD
-# -----------------------------------
-st.subheader("🔹 Elbow Method (Optimal K)")
+    X = df[[feature1, feature2]]
 
-wcss = []
-K_range = range(2,11)
-for k in K_range:
-    km = KMeans(n_clusters=k, random_state=42)
-    km.fit(X_scaled)
-    wcss.append(km.inertia_)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-fig1 = plt.figure()
-plt.plot(K_range, wcss, marker="o")
-plt.xlabel("Number of Clusters (K)")
-plt.ylabel("WCSS")
-plt.title("Elbow Method")
-st.pyplot(fig1)
+    model = KMeans(n_clusters=k, random_state=random_state)
+    df["Cluster"] = model.fit_predict(X_scaled)
 
-k = st.slider("Select Number of Clusters (K)", 2, 6, 3)
+    centers = scaler.inverse_transform(model.cluster_centers_)
 
-st.write(f"Chosen K = {k}")
+    # ---------------------------
+    # VISUALIZATION
+    # ---------------------------
+    st.subheader("Cluster Visualization")
 
-# -----------------------------------
-# TASK 6: TRAIN MODEL & ASSIGN CLUSTERS
-# -----------------------------------
-kmeans = KMeans(n_clusters=k, random_state=42)
-clusters = kmeans.fit_predict(X_scaled)
+    fig = plt.figure()
+    plt.scatter(df[feature1], df[feature2], c=df["Cluster"])
+    plt.scatter(centers[:,0], centers[:,1], marker="X", s=200)
+    plt.xlabel(feature1)
+    plt.ylabel(feature2)
+    st.pyplot(fig)
 
-df["Cluster"] = clusters
+    # ---------------------------
+    # SUMMARY
+    # ---------------------------
+    st.subheader("Cluster Summary")
 
-st.subheader("🔹 Clustered Dataset")
-st.dataframe(df.head())
+    summary = df.groupby("Cluster")[[feature1, feature2]].mean().reset_index()
+    summary["Customers"] = df["Cluster"].value_counts().sort_index().values
 
-# -----------------------------------
-# TASK 7: VISUALIZATION
-# -----------------------------------
-st.subheader("🔹 Cluster Visualization (Milk vs Grocery)")
+    st.dataframe(summary)
 
-fig2 = plt.figure()
-plt.scatter(df["Milk"], df["Grocery"], c=df["Cluster"])
-centers = scaler.inverse_transform(kmeans.cluster_centers_)
-plt.scatter(centers[:,1], centers[:,2], marker="X")
-plt.xlabel("Milk Spending")
-plt.ylabel("Grocery Spending")
-plt.title("Customer Segments")
-st.pyplot(fig2)
+    # ---------------------------
+    # BUSINESS INTERPRETATION
+    # ---------------------------
+    st.subheader("Business Interpretation")
 
-# -----------------------------------
-# TASK 8: CLUSTER PROFILING
-# -----------------------------------
-st.subheader("🔹 Cluster Profiling")
+    for i in summary["Cluster"]:
+        f1_avg = summary.loc[summary["Cluster"]==i, feature1].values[0]
+        f2_avg = summary.loc[summary["Cluster"]==i, feature2].values[0]
 
-profile = df.groupby("Cluster")[features].mean()
-st.dataframe(profile)
+        if f1_avg > X[feature1].mean() and f2_avg > X[feature2].mean():
+            st.write(f"🟢 Cluster {i}: High-spending customers")
+        elif f1_avg < X[feature1].mean() and f2_avg < X[feature2].mean():
+            st.write(f"🟡 Cluster {i}: Budget-conscious customers")
+        else:
+            st.write(f"🔵 Cluster {i}: Moderate spenders")
 
-st.subheader("🧾 Cluster Summaries")
-
-for i in profile.index:
-    st.write(f"Cluster {i}:")
-    st.write(profile.loc[i])
-    st.write("----")
-
-# -----------------------------------
-# TASK 9: BUSINESS INSIGHTS
-# -----------------------------------
-st.subheader("🔹 Business Strategies")
-
-st.write("""
-Cluster 0 → Offer discounts & loyalty programs  
-Cluster 1 → Bulk supply & inventory prioritization  
-Cluster 2 → Promote fresh & frozen products  
-""")
-
-# -----------------------------------
-# TASK 10: STABILITY CHECK
-# -----------------------------------
-st.subheader("🔹 Stability Test")
-
-kmeans2 = KMeans(n_clusters=k, random_state=100)
-clusters2 = kmeans2.fit_predict(X_scaled)
-
-same = np.sum(clusters == clusters2)
-st.write("Matching Assignments with new random state:", same, "out of", len(clusters))
-
-st.write("Limitation: K-Means requires predefined K and is sensitive to outliers.")
+    # ---------------------------
+    # USER GUIDANCE
+    # ---------------------------
+    st.info("Customers in the same cluster exhibit similar purchasing behaviour and can be targeted with similar strategies.")
